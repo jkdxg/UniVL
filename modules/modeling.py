@@ -267,7 +267,7 @@ class UniVL(UniVLPreTrainedModel):
                         else:
                             # decoder_scores_siamese = [clips , bz , frms , hidden]
                             # _get_decoder_score完成其最原始的功能，能不改就不改
-                            # print("siamese is using!")
+                            print("siamese is using!")
                             # decoder_scores,res_tuples = self._get_decoder_score(sequence_output, visual_output[0],
                             #                                                  input_ids, attention_mask, video_mask,
                             #                                                  input_caption_ids, decoder_mask, shaped=True)
