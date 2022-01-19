@@ -295,7 +295,6 @@ class UniVL(UniVLPreTrainedModel):
                     siamese_loss = 0.0
                     loss = decoder_loss
                     if siamese_trigger ==True:
-                        clipnum = visual_output.size(0)
                         siamese_similarity_m = self.get_crossPair_similarity_logits(sequence_output , visual_output,5).to(sequence_output.device)
                         
                         # siamese_similarity_m = [bz , 8 , 8 ]
@@ -326,10 +325,10 @@ class UniVL(UniVLPreTrainedModel):
                         # anchor_score_GTH = anchor_score_raw.gather(-1,GTH_index.unsqueeze(-1)).squeeze(-1)
                         
                         # 用learning from inside的方法，和anchor算loss
-                        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
+                        # siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
                         
                         # 和GTH算loss
-                        # siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size).to(output_caption_ids.device),output_caption_ids.view(-1))
+                        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size).to(output_caption_ids.device),output_caption_ids.view(-1))
                         loss =loss +siamese_loss
                         # loss =loss
                         # print(f'decoding:{time.perf_counter() - starttime:.8f}s')
@@ -429,11 +428,11 @@ class UniVL(UniVLPreTrainedModel):
         # output = [8 , bz , 48 , 1024]
         return siamese_video
     def get_sequence_visual_output(self, input_ids, token_type_ids, attention_mask, video,raw_video,video_mask, siamese_trigger,shaped=False):
-        # video  = [sia_clips , bz , max_frm_length , hidden_feature]
+
         shaped_video = video.reshape(-1,video.size(-2),video.size(-1))
-        # 
+        
         siamese_video = torch.zeros(raw_video.size()).repeat(8,1,1)
-        clip_num = video.size(0)
+        clip_num = 8
         if shaped is False:
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
@@ -448,14 +447,16 @@ class UniVL(UniVLPreTrainedModel):
             visual_layers, _ = self.visual(raw_video, video_mask, output_all_encoded_layers=True)
             visual_output = visual_layers[-1]
             return sequence_output,visual_output
+        # video = [clip*bz , 5,feature]
+        frame_num = video.size(-2)
+        video_mask = torch.ones(video.size(0),frame_num).long().to(sequence_output.device)
+        video = video.to(sequence_output.device)
 
-        siamese_clip_num = video.size(0)
-        # 先获得一次video的size
-        visual_layers, _ = self.visual(raw_video, video_mask, output_all_encoded_layers=True)
+        visual_layers, _ = self.visual(video, video_mask, output_all_encoded_layers=True)
         visual_output = visual_layers[-1]
         
-        siamese_video = self.getSiameseClips(visual_output,48)
-        
+        # siamese_video = self.getSiameseClips(visual_output,48)
+        siamese_video = visual_output.reshape(clip_num,visual_output.size(0) // clip_num,visual_output.size(-2),visual_output.size(-1))
         
         
         
@@ -613,7 +614,7 @@ class UniVL(UniVLPreTrainedModel):
         # similarity = (bz , bz)
         return similarity_matrix
     def _get_decoder_score(self, sequence_output, visual_output, input_ids, attention_mask, video_mask, input_caption_ids, decoder_mask, shaped=False):
-
+        # visual_output
         if shaped is False:
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             attention_mask = attention_mask.view(-1, attention_mask.shape[-1])

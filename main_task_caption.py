@@ -163,7 +163,7 @@ def init_model(args, device, n_gpu, local_rank):
         model_state_dict = None
 
     # Prepare model
-    cache_dir = "/home/gujiayang/workspace/UniVL-main/cache_dir"
+    cache_dir = "/home/gujiayang/workspace/videocaption/UniVL/cache_dir"
     model = UniVL.from_pretrained(args.bert_model, args.visual_model, args.cross_model, args.decoder_model,
                                    cache_dir=cache_dir, state_dict=model_state_dict, task_config=args)
 
@@ -380,7 +380,10 @@ def getSiameseClips(video,siamese_video,max_frames):
     
     
     siamese_video = siamese_output.permute(1,0,2,3)
-    # output = [8 , bz , 48 , 1024]
+    
+    # siamese_video = [8 , bz , 48 , 1024]
+    # output = [8*bz , 5, 1024]
+    siamese_video = siamese_video.reshape(-1,siamese_video.size(-2),siamese_video.size(-1))
     return siamese_video
     
 def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, optimizer, scheduler,
@@ -403,9 +406,9 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
         pairs_masked_text, pairs_token_labels, masked_video, video_labels_index,\
         pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids  = batch
         # siamese_video = [clip , batch , frame_num  = 5 , hidden_features(1024)]
-        siamese_video = torch.zeros(8,video.size(0),48,video.size(3))
+        siamese_video = torch.zeros(8,video.size(0),5,video.size(3))
         
-        # siamese_video = getSiameseClips(video,siamese_video,args.max_frames)
+        siamese_video = getSiameseClips(video,siamese_video,args.max_frames)
         # print(f'loading:{time.perf_counter() - starttime:.8f}s')
         starttime = time.perf_counter()
         loss = model(input_ids, segment_ids, input_mask, video, siamese_video,video_mask,
