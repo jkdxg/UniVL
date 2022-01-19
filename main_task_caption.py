@@ -9,10 +9,10 @@ import torch
 from torch.utils.data import (SequentialSampler)
 import numpy as np
 import random
-import time
+
 from collections import OrderedDict
 from nlgeval import NLGEval
-
+import time
 import argparse
 from modules.tokenization import BertTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
