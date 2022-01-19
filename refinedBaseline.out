@@ -1,0 +1,164 @@
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+INFO:logger:device: cuda:3 n_gpu: 8
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:device: cuda:7 n_gpu: 8
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:device: cuda:5 n_gpu: 8
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:device: cuda:6 n_gpu: 8
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:device: cuda:2 n_gpu: 8
+INFO:logger:Effective parameters:
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txtINFO:logger:device: cuda:1 n_gpu: 8
+
+INFO:logger:  <<< batch_size: 128
+INFO:logger:device: cuda:4 n_gpu: 8
+INFO:logger:  <<< batch_size_val: 32
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:  <<< bert_model: bert-base-uncased
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+INFO:logger:  <<< cache_dir: 
+INFO:logger:  <<< clip_num: 8
+INFO:logger:  <<< coef_lr: 0.1
+INFO:logger:  <<< cross_model: cross-base
+INFO:logger:  <<< cross_num_hidden_layers: 2
+INFO:logger:  <<< data_path: /home/gujiayang/data/dataset/videocaption/msrvtt/MSRVTT_data.json
+INFO:logger:  <<< datatype: msrvtt
+INFO:logger:  <<< decoder_model: decoder-base
+INFO:logger:  <<< decoder_num_hidden_layers: 3
+INFO:logger:  <<< do_eval: False
+INFO:logger:  <<< do_lower_case: True
+INFO:logger:  <<< do_pretrain: False
+INFO:logger:  <<< do_train: True
+INFO:logger:  <<< epochs: 5
+INFO:logger:  <<< feature_framerate: 1
+INFO:logger:  <<< features_path: /home/gujiayang/data/dataset/videocaption/msrvtt/msrvtt_videos_features.pickle
+INFO:logger:  <<< fp16: False
+INFO:logger:  <<< fp16_opt_level: O1
+INFO:logger:  <<< gradient_accumulation_steps: 1
+INFO:logger:  <<< hard_negative_rate: 0.5
+INFO:logger:  <<< init_model: /home/gujiayang/data/dataset/videocaption/univl.pretrained.bin
+INFO:logger:  <<< local_rank: 0
+INFO:logger:  <<< lr: 3e-05
+INFO:logger:  <<< lr_decay: 0.9
+INFO:logger:  <<< margin: 0.1
+INFO:logger:  <<< max_frames: 48
+INFO:logger:  <<< max_words: 48
+INFO:logger:  <<< min_time: 5.0
+INFO:logger:  <<< n_display: 100
+INFO:logger:  <<< n_gpu: 8
+INFO:logger:  <<< n_pair: 1
+INFO:logger:  <<< negative_weighting: 1
+INFO:logger:  <<< num_thread_reader: 4
+INFO:logger:  <<< output_dir: /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption
+INFO:logger:  <<< sampled_use_mil: False
+INFO:logger:  <<< seed: 42
+INFO:logger:  <<< stage_two: True
+INFO:logger:  <<< task_type: caption
+INFO:logger:  <<< text_num_hidden_layers: 12
+INFO:logger:  <<< train_csv: /home/gujiayang/data/dataset/videocaption/msrvtt/MSRVTT_train.9k.csv
+INFO:logger:  <<< use_mil: False
+INFO:logger:  <<< val_csv: /home/gujiayang/data/dataset/videocaption/msrvtt/MSRVTT_JSFUSION_test.csv
+INFO:logger:  <<< video_dim: 1024
+INFO:logger:  <<< visual_model: visual-base
+INFO:logger:  <<< visual_num_hidden_layers: 6
+INFO:logger:  <<< warmup_proportion: 0.1
+INFO:logger:  <<< world_size: 8
+INFO:logger:device: cuda:0 n_gpu: 8
+https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt
+WARNING:modules.modeling:Stage-One:False, Stage-Two:True
+WARNING:modules.modeling:Set bert_config.num_hidden_layers: 12.
+WARNING:modules.modeling:Set visual_config.num_hidden_layers: 6.
+WARNING:modules.modeling:Set cross_config.num_hidden_layers: 2.
+WARNING:modules.modeling:Set decoder_config.num_decoder_layers: 3.
+INFO:logger:***** Running test *****
+INFO:logger:  Num examples = 2990
+INFO:logger:  Batch size = 32
+INFO:logger:  Num steps = 94
+INFO:logger:***** Running training *****
+INFO:logger:  Num examples = 130260
+INFO:logger:  Batch size = 128
+INFO:logger:  Num steps = 5085
+INFO:logger:Epoch: 1/5, Step: 100/1017, Lr: 0.000006, Loss: 0.879576, Time/step: 0.599014
+INFO:logger:Epoch: 1/5, Step: 200/1017, Lr: 0.000012, Loss: 0.785881, Time/step: 0.928842
+INFO:logger:Epoch: 1/5, Step: 300/1017, Lr: 0.000018, Loss: 0.749800, Time/step: 0.645745
+INFO:logger:Epoch: 1/5, Step: 400/1017, Lr: 0.000024, Loss: 0.437543, Time/step: 0.569730
+INFO:logger:Epoch: 1/5, Step: 500/1017, Lr: 0.000029, Loss: 0.962166, Time/step: 0.570606
+INFO:logger:Epoch: 1/5, Step: 600/1017, Lr: 0.000029, Loss: 0.574553, Time/step: 0.571825
+INFO:logger:Epoch: 1/5, Step: 700/1017, Lr: 0.000029, Loss: 0.694114, Time/step: 0.575906
+INFO:logger:Epoch: 1/5, Step: 800/1017, Lr: 0.000028, Loss: 0.803637, Time/step: 0.575759
+INFO:logger:Epoch: 1/5, Step: 900/1017, Lr: 0.000027, Loss: 0.619999, Time/step: 0.574439
+INFO:logger:Epoch: 1/5, Step: 1000/1017, Lr: 0.000027, Loss: 0.679540, Time/step: 0.581123
+INFO:logger:Epoch 1/5 Finished, Train Loss: 0.755161
+INFO:logger:Model saved to /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.0
+WARNING:logger:Skip the evaluation after 1-th epoch.
+INFO:logger:Epoch: 2/5, Step: 83/1017, Lr: 0.000026, Loss: 0.556622, Time/step: 0.481740
+INFO:logger:Epoch: 2/5, Step: 183/1017, Lr: 0.000025, Loss: 0.788817, Time/step: 0.570861
+INFO:logger:Epoch: 2/5, Step: 283/1017, Lr: 0.000025, Loss: 0.612229, Time/step: 0.567847
+INFO:logger:Epoch: 2/5, Step: 383/1017, Lr: 0.000024, Loss: 0.702468, Time/step: 0.570356
+INFO:logger:Epoch: 2/5, Step: 483/1017, Lr: 0.000024, Loss: 0.552715, Time/step: 0.566470
+INFO:logger:Epoch: 2/5, Step: 583/1017, Lr: 0.000023, Loss: 0.586210, Time/step: 0.576719
+INFO:logger:Epoch: 2/5, Step: 683/1017, Lr: 0.000022, Loss: 0.637013, Time/step: 0.565486
+INFO:logger:Epoch: 2/5, Step: 783/1017, Lr: 0.000022, Loss: 0.616492, Time/step: 0.566394
+INFO:logger:Epoch: 2/5, Step: 883/1017, Lr: 0.000021, Loss: 0.799777, Time/step: 0.562737
+INFO:logger:Epoch: 2/5, Step: 983/1017, Lr: 0.000020, Loss: 0.513646, Time/step: 0.631034
+INFO:logger:Epoch 2/5 Finished, Train Loss: 0.640938
+INFO:logger:Model saved to /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.1
+INFO:logger:>>>  BLEU_1: 0.7997, BLEU_2: 0.6619, BLEU_3: 0.5272, BLEU_4: 0.4063
+INFO:logger:>>>  METEOR: 0.2815, ROUGE_L: 0.6034, CIDEr: 0.4785
+INFO:logger:The best model is: /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.1, the Bleu_4 is: 0.4063
+INFO:logger:Epoch: 3/5, Step: 66/1017, Lr: 0.000020, Loss: 0.645508, Time/step: 0.382718
+INFO:logger:Epoch: 3/5, Step: 166/1017, Lr: 0.000019, Loss: 0.607192, Time/step: 0.581351
+INFO:logger:Epoch: 3/5, Step: 266/1017, Lr: 0.000018, Loss: 0.459008, Time/step: 0.631402
+INFO:logger:Epoch: 3/5, Step: 366/1017, Lr: 0.000018, Loss: 0.632675, Time/step: 0.581852
+INFO:logger:Epoch: 3/5, Step: 466/1017, Lr: 0.000017, Loss: 0.566450, Time/step: 0.583151
+INFO:logger:Epoch: 3/5, Step: 566/1017, Lr: 0.000016, Loss: 0.502212, Time/step: 0.575646
+INFO:logger:Epoch: 3/5, Step: 666/1017, Lr: 0.000016, Loss: 0.689893, Time/step: 0.576733
+INFO:logger:Epoch: 3/5, Step: 766/1017, Lr: 0.000015, Loss: 0.619613, Time/step: 0.571040
+INFO:logger:Epoch: 3/5, Step: 866/1017, Lr: 0.000014, Loss: 0.706913, Time/step: 0.578536
+INFO:logger:Epoch: 3/5, Step: 966/1017, Lr: 0.000014, Loss: 0.576014, Time/step: 0.566021
+INFO:logger:Epoch 3/5 Finished, Train Loss: 0.595674
+INFO:logger:Model saved to /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.2
+INFO:logger:>>>  BLEU_1: 0.8128, BLEU_2: 0.6743, BLEU_3: 0.5388, BLEU_4: 0.4202
+INFO:logger:>>>  METEOR: 0.2893, ROUGE_L: 0.6110, CIDEr: 0.5047
+INFO:logger:The best model is: /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.2, the Bleu_4 is: 0.4202
+INFO:logger:Epoch: 4/5, Step: 49/1017, Lr: 0.000013, Loss: 0.591554, Time/step: 0.287036
+INFO:logger:Epoch: 4/5, Step: 149/1017, Lr: 0.000012, Loss: 0.640564, Time/step: 0.566270
+INFO:logger:Epoch: 4/5, Step: 249/1017, Lr: 0.000012, Loss: 0.456416, Time/step: 0.579913
+INFO:logger:Epoch: 4/5, Step: 349/1017, Lr: 0.000011, Loss: 0.485425, Time/step: 0.566628
+INFO:logger:Epoch: 4/5, Step: 449/1017, Lr: 0.000010, Loss: 0.487399, Time/step: 0.562983
+INFO:logger:Epoch: 4/5, Step: 549/1017, Lr: 0.000010, Loss: 0.663123, Time/step: 0.563145
+INFO:logger:Epoch: 4/5, Step: 649/1017, Lr: 0.000009, Loss: 0.447957, Time/step: 0.571684
+INFO:logger:Epoch: 4/5, Step: 749/1017, Lr: 0.000008, Loss: 0.621347, Time/step: 0.571347
+INFO:logger:Epoch: 4/5, Step: 849/1017, Lr: 0.000008, Loss: 0.695560, Time/step: 0.573131
+INFO:logger:Epoch: 4/5, Step: 949/1017, Lr: 0.000007, Loss: 0.466054, Time/step: 0.569737
+INFO:logger:Epoch 4/5 Finished, Train Loss: 0.569608
+INFO:logger:Model saved to /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.3
+INFO:logger:>>>  BLEU_1: 0.8089, BLEU_2: 0.6691, BLEU_3: 0.5371, BLEU_4: 0.4210
+INFO:logger:>>>  METEOR: 0.2910, ROUGE_L: 0.6104, CIDEr: 0.4991
+INFO:logger:The best model is: /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.3, the Bleu_4 is: 0.4210
+INFO:logger:Epoch: 5/5, Step: 32/1017, Lr: 0.000006, Loss: 0.493084, Time/step: 0.189448
+INFO:logger:Epoch: 5/5, Step: 132/1017, Lr: 0.000006, Loss: 0.548027, Time/step: 0.574585
+INFO:logger:Epoch: 5/5, Step: 232/1017, Lr: 0.000005, Loss: 0.590494, Time/step: 0.576030
+INFO:logger:Epoch: 5/5, Step: 332/1017, Lr: 0.000004, Loss: 0.677089, Time/step: 0.575926
+INFO:logger:Epoch: 5/5, Step: 432/1017, Lr: 0.000004, Loss: 0.553056, Time/step: 0.571801
+INFO:logger:Epoch: 5/5, Step: 532/1017, Lr: 0.000003, Loss: 0.539882, Time/step: 0.571821
+INFO:logger:Epoch: 5/5, Step: 632/1017, Lr: 0.000003, Loss: 0.522988, Time/step: 0.581175
+INFO:logger:Epoch: 5/5, Step: 732/1017, Lr: 0.000002, Loss: 0.667196, Time/step: 0.576236
+INFO:logger:Epoch: 5/5, Step: 832/1017, Lr: 0.000001, Loss: 0.521808, Time/step: 0.574581
+INFO:logger:Epoch: 5/5, Step: 932/1017, Lr: 0.000001, Loss: 0.582624, Time/step: 0.566170
+INFO:logger:Epoch 5/5 Finished, Train Loss: 0.549180
+INFO:logger:Model saved to /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.4
+INFO:logger:>>>  BLEU_1: 0.8090, BLEU_2: 0.6690, BLEU_3: 0.5348, BLEU_4: 0.4166
+INFO:logger:>>>  METEOR: 0.2891, ROUGE_L: 0.6089, CIDEr: 0.5030
+INFO:logger:The best model is: /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.3, the Bleu_4 is: 0.4210
+INFO:logger:Model loaded from /home/gujiayang/workspace/UniVL-main/ckpts/ckpt_msrvtt_caption/pytorch_model.bin.3
+WARNING:modules.modeling:Stage-One:False, Stage-Two:True
+WARNING:modules.modeling:Set bert_config.num_hidden_layers: 12.
+WARNING:modules.modeling:Set visual_config.num_hidden_layers: 6.
+WARNING:modules.modeling:Set cross_config.num_hidden_layers: 2.
+WARNING:modules.modeling:Set decoder_config.num_decoder_layers: 3.
+INFO:logger:>>>  BLEU_1: 0.8089, BLEU_2: 0.6691, BLEU_3: 0.5371, BLEU_4: 0.4210
+INFO:logger:>>>  METEOR: 0.2910, ROUGE_L: 0.6104, CIDEr: 0.4991
