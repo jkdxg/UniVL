@@ -412,7 +412,7 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
                      masked_video=masked_video, video_labels_index=video_labels_index,
                      input_caption_ids=pairs_input_caption_ids, decoder_mask=pairs_decoder_mask,
                      output_caption_ids=pairs_output_caption_ids,siamese_trigger = True)
-        print(f'model sum:{time.perf_counter() - starttime:.8f}s')
+        # print(f'model sum:{time.perf_counter() - starttime:.8f}s')
         starttime = time.perf_counter()
         if n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu.

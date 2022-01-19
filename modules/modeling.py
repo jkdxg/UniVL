@@ -56,6 +56,7 @@ class UniVLPreTrainedModel(PreTrainedModel, nn.Module):
         self.decoder = None
         
         
+        
 
     @classmethod
     def from_pretrained(cls, pretrained_bert_name, visual_model_name, cross_model_name, decoder_model_name,
@@ -123,6 +124,9 @@ class UniVL(UniVLPreTrainedModel):
 
         self._stage_one = True
         self._stage_two = False
+        
+        self.clip_num = 5
+        self.frame_num = 8
 
         if check_attr('stage_two', self.task_config):
             self._stage_one = False
@@ -174,8 +178,8 @@ class UniVL(UniVLPreTrainedModel):
             self.decoder_loss_fct = CrossEntropyLoss(ignore_index=-1)
 
         self.normalize_video = NormalizeVideo(task_config)
-        self.weighted_m1 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,8),requires_grad = True)
-        self.weighted_m2 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,8),requires_grad = True)
+        self.weighted_m1 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
+        self.weighted_m2 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
         mILNCELoss = MILNCELoss(batch_size=task_config.batch_size // task_config.n_gpu, n_pair=task_config.n_pair, )
         maxMarginRankingLoss = MaxMarginRankingLoss(margin=task_config.margin,
                                                     negative_weighting=task_config.negative_weighting,
@@ -267,7 +271,7 @@ class UniVL(UniVLPreTrainedModel):
                         else:
                             # decoder_scores_siamese = [clips , bz , frms , hidden]
                             # _get_decoder_score完成其最原始的功能，能不改就不改
-                            print("siamese is using!")
+                            # print("siamese is using!")
                             # decoder_scores,res_tuples = self._get_decoder_score(sequence_output, visual_output[0],
                             #                                                  input_ids, attention_mask, video_mask,
                             #                                                  input_caption_ids, decoder_mask, shaped=True)
@@ -278,12 +282,12 @@ class UniVL(UniVLPreTrainedModel):
                             #                                                  input_ids, attention_mask, video_mask,
                             #                                                  input_caption_ids, decoder_mask, shaped=True)
                             #     decoder_scores_siamese[_idx] = decoder_scores_temp
-                            video_mask = torch.ones(video_mask.size(0),5).to(video_mask.device)
+                            video_mask = torch.ones(video_mask.size(0),self.frame_num).to(video_mask.device)
                             decoder_scores_siamese,res_tuples = self._get_decoder_score(sequence_output, visual_output.reshape(-1,visual_output.size(-2),visual_output.size(-1)),
                                                                              input_ids, attention_mask, video_mask,
                                                                              input_caption_ids, decoder_mask, shaped=True)
                             # decoder_scores_siamese = [clip_num , bz , frm_max_length , score_features]
-                            decoder_scores_siamese = decoder_scores_siamese.reshape(8,16,decoder_scores_siamese.size(-2),decoder_scores_siamese.size(-1))
+                            decoder_scores_siamese = decoder_scores_siamese.reshape(self.clip_num,16,decoder_scores_siamese.size(-2),decoder_scores_siamese.size(-1))
                             decoder_scores = decoder_scores_siamese[0]
                         
                            
@@ -297,7 +301,7 @@ class UniVL(UniVLPreTrainedModel):
                     loss = decoder_loss
                     if siamese_trigger ==True:
                         clipnum = visual_output.size(0)
-                        siamese_similarity_m = self.get_crossPair_similarity_logits(sequence_output , visual_output,5).to(sequence_output.device)
+                        siamese_similarity_m = self.get_crossPair_similarity_logits(sequence_output , visual_output,self.frame_num).to(sequence_output.device)
                         
                         # siamese_similarity_m = [bz , 8 , 8 ]
                         
@@ -398,18 +402,18 @@ class UniVL(UniVLPreTrainedModel):
         nce_loss = nce_loss.mean()
         return nce_loss
     def getSiameseClips(self,video,max_frames):
-        siamese_output = torch.zeros(video.size(0),8,5,video.size(-1))
-        sia_idx = np.zeros((8,5),int)
-        single_ran_idx = np.zeros(5,int)
-        for j in range(5):
+        siamese_output = torch.zeros(video.size(0),self.clip_num,self.frame_num,video.size(-1))
+        sia_idx = np.zeros((self.clip_num,self.frame_num),int)
+        single_ran_idx = np.zeros(self.frame_num,int)
+        for j in range(self.frame_num):
             if j ==0:
-                single_ran_idx[j] = np.random.randint(0,5*j+5)
+                single_ran_idx[j] = np.random.randint(0,self.frame_num*j+self.frame_num)
             elif j<=2:
-                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,5*j+5)
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,self.frame_num*j+self.frame_num)
             else:
-                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,max_frames-1-8-5+j)
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,max_frames-1-self.frame_num-5+j)
         sia_idx[0]=single_ran_idx
-        for i in range(1,8):
+        for i in range(1,self.clip_num):
             sia_idx[i] = i+sia_idx[0]
         sia_idx = torch.from_numpy(sia_idx)
         # For Indexing
@@ -418,11 +422,11 @@ class UniVL(UniVLPreTrainedModel):
         
             single_batch_video = video[batch_num]
             # gathered_batch_video = [clip_num , 5 , 1024]
-            gathered_batch_video = single_batch_video.unsqueeze(1).expand(48,5,768).gather(dim = 0 ,index=sia_idx.unsqueeze(2).expand(8,5,768))
+            gathered_batch_video = single_batch_video.unsqueeze(1).expand(48,self.frame_num,768).gather(dim = 0 ,index=sia_idx.unsqueeze(2).expand(self.clip_num,self.frame_num,768))
             # gathered_batch_video = [clip_num, 5 + padding=48 , 1024] == [ 8 , 48 , 1024 ] 
             # need to padding second dim to match frm_max_length
             # gathered_batch_video_padding = padding_video(gathered_batch_video,max_frames)
-            # tempoutput = [bz , 8 , 48 , 1024]
+
             siamese_output[batch_num] = gathered_batch_video
     
     
@@ -433,7 +437,7 @@ class UniVL(UniVLPreTrainedModel):
         # video  = [sia_clips , bz , max_frm_length , hidden_feature]
         shaped_video = video.reshape(-1,video.size(-2),video.size(-1))
         # 
-        siamese_video = torch.zeros(raw_video.size()).repeat(8,1,1)
+        siamese_video = torch.zeros(raw_video.size()).repeat(self.clip_num,1,1)
         clip_num = video.size(0)
         if shaped is False:
             input_ids = input_ids.view(-1, input_ids.shape[-1])
