@@ -201,7 +201,6 @@ class UniVL(UniVLPreTrainedModel):
         token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
         attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
         video_mask = video_mask.view(-1, video_mask.shape[-1])
-        siamese_clip_num = siamese_video.size(0)
         # for _idx in range(siamese_clip_num):
         #     siamese_video[_idx] = self.normalize_video(siamese_video[_idx])
         video = self.normalize_video(video)

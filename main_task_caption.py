@@ -196,6 +196,7 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
     ]
 
     scheduler = None
+    scheduler = None
     optimizer = BertAdam(optimizer_grouped_parameters, lr=args.lr, warmup=args.warmup_proportion,
                          schedule='warmup_linear', t_total=num_train_optimization_steps, weight_decay=0.01,
                          max_grad_norm=1.0)
