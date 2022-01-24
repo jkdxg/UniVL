@@ -408,7 +408,7 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
         # siamese_video = [clip , batch , frame_num  = 5 , hidden_features(1024)]
         siamese_video = torch.zeros(8,video.size(0),5,video.size(3))
         
-        siamese_video = getSiameseClips(video,siamese_video,args.max_frames)
+        # siamese_video = getSiameseClips(video,siamese_video,args.max_frames)
         # print(f'loading:{time.perf_counter() - starttime:.8f}s')
         starttime = time.perf_counter()
         loss = model(input_ids, segment_ids, input_mask, video, siamese_video,video_mask,
@@ -727,7 +727,7 @@ def main():
             if args.local_rank == 0:
                 logger.info("Epoch %d/%s Finished, Train Loss: %f", epoch + 1, args.epochs, tr_loss)
                 output_model_file = save_model(epoch, args, model, type_name="")
-                if epoch > 0:
+                if epoch >= 0:
                     Bleu_4 = eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
                     if best_score <= Bleu_4:
                         best_score = Bleu_4

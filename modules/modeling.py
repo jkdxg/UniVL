@@ -125,7 +125,7 @@ class UniVL(UniVLPreTrainedModel):
         self._stage_one = True
         self._stage_two = False
         
-        self.clip_num = 5
+        self.clip_num = 2
         self.frame_num = 8
 
         if check_attr('stage_two', self.task_config):
@@ -282,7 +282,7 @@ class UniVL(UniVLPreTrainedModel):
                             #                                                  input_caption_ids, decoder_mask, shaped=True)
                             #     decoder_scores_siamese[_idx] = decoder_scores_temp
                             video_mask = torch.ones(video_mask.size(0),self.frame_num).to(video_mask.device)
-                            decoder_scores_siamese,res_tuples ,cross_output= self._get_decoder_score(sequence_output, visual_output.reshape(-1,visual_output.size(-2),visual_output.size(-1)),
+                            decoder_scores_siamese,res_tuples = self._get_decoder_score(sequence_output, visual_output.reshape(-1,visual_output.size(-2),visual_output.size(-1)),
                                                                              input_ids, attention_mask, video_mask,
                                                                              input_caption_ids, decoder_mask, shaped=True)
                             # decoder_scores_siamese = [clip_num , bz , frm_max_length , score_features]
@@ -299,8 +299,8 @@ class UniVL(UniVLPreTrainedModel):
                     siamese_loss = 0.0
                     loss = decoder_loss
                     if siamese_trigger ==True:
-                        # siamese_similarity_m = self.get_crossPair_similarity_logits_concat(sequence_output , visual_output,self.frame_num).to(sequence_output.device)
-                        siamese_similarity_m = self.get_crossPair_similarity_logits(cross_output,48).to(sequence_output.device)
+                        siamese_similarity_m = self.get_crossPair_similarity_logits_concat(sequence_output , visual_output,self.frame_num).to(sequence_output.device)
+                        # siamese_similarity_m = self.get_crossPair_similarity_logits(cross_output,48).to(sequence_output.device)
                         # siamese_similarity_m = [bz , 8 , 8 ]
                         
                         # decoder_scores_siamese = [8,16,48,30522]
@@ -329,10 +329,10 @@ class UniVL(UniVLPreTrainedModel):
                         # anchor_score_GTH = anchor_score_raw.gather(-1,GTH_index.unsqueeze(-1)).squeeze(-1)
                         
                         # 用learning from inside的方法，和anchor算loss
-                        # siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
+                        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
                         
                         # 和GTH算loss
-                        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size).to(output_caption_ids.device),output_caption_ids.view(-1))
+                        # siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size).to(output_caption_ids.device),output_caption_ids.view(-1))
                         loss =loss +siamese_loss
                         # loss =loss
                         # print(f'decoding:{time.perf_counter() - starttime:.8f}s')
@@ -581,26 +581,13 @@ class UniVL(UniVLPreTrainedModel):
 
 
         similarity_matrix = torch.zeros(batch_size,clip_num,clip_num)
-        # concat_feature = torch.zeros(clip_num,batch_size,visual_output.size(2)*2,visual_output.size(3))
-        # for _idx in range(batch_size):
-        #     single_silimarity[_idx][_idx]=0.0
+       
         visual_output = visual_output.to(sequence_output.device)
         
-        # for i in range(clip_num):
-        #     concat_feature[i] = torch.cat((sequence_output, visual_output[i]), dim=1)  # concatnate tokens and frames
-        # concat_feature = [clip_num * bz , 53 , 768]
+        
         concat_feature = torch.cat((sequence_output,visual_output),dim = 1)  
         concat_feature = concat_feature.reshape(batch_size,clip_num,-1)
-        # concat_feature = concat_feature.reshape(clip_num,-1,concat_feature.size(-2),concat_feature.size(-1))
         
-        # concat_feature = concat_feature.permute(1,0,2,3)
-        # concat_feature = [ bz , clip_num ,48 ,1024]
-        # concat_feature_view = concat_feature.view(batch_size,clip_num,-1)
-
-        # concat_feature_view = [bz , clip_num , hidden_features]
-        # 这一步转换是为了后面能方便地求clip1~8之间的相似度e
-        # visual_output = visual_output.permute(1,0,2,3)
-        # ——————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
         for _idx in range(batch_size):
             single_similarity_m = torch.zeros(clip_num,clip_num)
 
@@ -612,10 +599,7 @@ class UniVL(UniVLPreTrainedModel):
                 single_similarity_m[j][j]=0.0
             single_similarity_sft = F.softmax(single_similarity_m,1)
             similarity_matrix[_idx] = single_similarity_sft
-        
-        
-        # softmax normalization
-        # similarity = (bz , bz)
+
         return similarity_matrix
     def get_crossPair_similarity_logits(self,cross_input , max_frm_length = 48):
         similarity_matrix = torch.zeros(16,self.clip_num,self.clip_num)
@@ -663,7 +647,7 @@ class UniVL(UniVLPreTrainedModel):
         decoder_mask = decoder_mask.repeat(clip_num,1)
         decoder_scores = self.decoder(input_caption_ids, encoder_outs=cross_output, answer_mask=decoder_mask, encoder_mask=concat_mask)
         
-        return decoder_scores,res_tuples,cross_output
+        return decoder_scores,res_tuples
     
 
     def decoder_caption(self, sequence_output, visual_output, input_ids, attention_mask, video_mask, input_caption_ids, decoder_mask,
@@ -676,7 +660,7 @@ class UniVL(UniVLPreTrainedModel):
             input_caption_ids = input_caption_ids.view(-1, input_caption_ids.shape[-1])
             decoder_mask = decoder_mask.view(-1, decoder_mask.shape[-1])
 
-        decoder_scores, _ ,_= self._get_decoder_score(sequence_output, visual_output,
+        decoder_scores, _ = self._get_decoder_score(sequence_output, visual_output,
                                                     input_ids, attention_mask, video_mask,
                                                     input_caption_ids, decoder_mask, shaped=True)
 
