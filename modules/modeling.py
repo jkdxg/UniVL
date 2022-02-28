@@ -26,6 +26,7 @@ import datetime
 
 import torch
 from torch import nn
+import torchvision as TV
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, MSELoss
 
@@ -35,7 +36,10 @@ from modules.module_visual import VisualModel, VisualConfig, VisualOnlyMLMHead
 from modules.module_cross import CrossModel, CrossConfig
 from modules.module_decoder import DecoderModel, DecoderConfig
 from torch.autograd import Variable
+from modules.vid_swin import SwinTransformer3D
 logger = logging.getLogger(__name__)
+
+import transformers
 
 
 class UniVLPreTrainedModel(PreTrainedModel, nn.Module):
@@ -125,8 +129,11 @@ class UniVL(UniVLPreTrainedModel):
         self._stage_one = True
         self._stage_two = False
         
-        self.clip_num = 2
-        self.frame_num = 8
+        self.clip_num = 3
+        self.frame_num = 4
+
+        bert = transformers.BertForMaskedLM.from_pretrained('bert-base-uncased')
+        self.mask_ext, self.trsfr = bert.get_extended_attention_mask, bert.bert.encoder
 
         if check_attr('stage_two', self.task_config):
             self._stage_one = False
@@ -152,6 +159,13 @@ class UniVL(UniVLPreTrainedModel):
         visual_config = update_attr("visual_config", visual_config, "num_hidden_layers",
                                     self.task_config, "visual_num_hidden_layers")
         self.visual = VisualModel(visual_config) # Transformer_based module
+        self.swin = SwinTransformer3D()
+        self.swin.load_state_dict(torch.load('/home/gujiayang/workspace/videocaption/UniVL/_snapshot/ckpt_video-swin.pt', map_location='cpu'))
+        self.swinNorm = torch.nn.LayerNorm(768)
+        
+        self.fc1 = torch.nn.Linear(self.clip_num,1)
+        self.fc2 = torch.nn.Linear(self.clip_num,1)
+        self.swin_trigger = False
         visual_word_embeddings_weight = self.visual.embeddings.word_embeddings.weight
         # <=== End of Video Encoder
 
@@ -178,8 +192,8 @@ class UniVL(UniVLPreTrainedModel):
             self.decoder_loss_fct = CrossEntropyLoss(ignore_index=-1)
 
         self.normalize_video = NormalizeVideo(task_config)
-        self.weighted_m1 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
-        self.weighted_m2 = Variable(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
+        self.weighted_m1 = torch.nn.Parameter(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
+        self.weighted_m2 = torch.nn.Parameter(torch.ones(task_config.batch_size// task_config.n_gpu,1,self.clip_num),requires_grad = True)
         mILNCELoss = MILNCELoss(batch_size=task_config.batch_size // task_config.n_gpu, n_pair=task_config.n_pair, )
         maxMarginRankingLoss = MaxMarginRankingLoss(margin=task_config.margin,
                                                     negative_weighting=task_config.negative_weighting,
@@ -198,16 +212,16 @@ class UniVL(UniVLPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids, attention_mask, video, siamese_video,video_mask=None,
                 pairs_masked_text=None, pairs_token_labels=None, masked_video=None, video_labels_index=None,
-                input_caption_ids=None, decoder_mask=None, output_caption_ids=None,siamese_trigger = False):
+                input_caption_ids=None, decoder_mask=None, output_caption_ids=None,siamese_trigger = False,swin_trigger = True):
         starttime = time.perf_counter()
-        
+        self.swin_trigger = swin_trigger
         input_ids = input_ids.view(-1, input_ids.shape[-1])
         token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
         attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
         video_mask = video_mask.view(-1, video_mask.shape[-1])
         # for _idx in range(siamese_clip_num):
         #     siamese_video[_idx] = self.normalize_video(siamese_video[_idx])
-        video = self.normalize_video(video)
+        
         # print(f'nomalized:{time.perf_counter() - starttime:.8f}s')
         
         starttime = time.perf_counter()
@@ -215,7 +229,12 @@ class UniVL(UniVLPreTrainedModel):
             input_caption_ids = input_caption_ids.view(-1, input_caption_ids.shape[-1])
             decoder_mask = decoder_mask.view(-1, decoder_mask.shape[-1])
         # visual_output = [siamese_num , bz , frm, hidden_layer]
-        sequence_output, visual_output = self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
+        if swin_trigger == False:
+            video = self.normalize_video(video)
+            sequence_output, visual_output = self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
+                                                                         siamese_video,video, video_mask, siamese_trigger,shaped=True)
+        else:
+            sequence_output, visual_output = self.get_sequence_visual_output_VT(input_ids, token_type_ids, attention_mask,
                                                                          siamese_video,video, video_mask, siamese_trigger,shaped=True)
         # print(f'encoding:{time.perf_counter() - starttime:.8f}s')
         
@@ -268,25 +287,12 @@ class UniVL(UniVLPreTrainedModel):
                                                                              input_ids, attention_mask, video_mask,
                                                                              input_caption_ids, decoder_mask, shaped=True)
                         else:
-                            # decoder_scores_siamese = [clips , bz , frms , hidden]
-                            # _get_decoder_score完成其最原始的功能，能不改就不改
-                            # print("siamese is using!")
-                            # decoder_scores,res_tuples = self._get_decoder_score(sequence_output, visual_output[0],
-                            #                                                  input_ids, attention_mask, video_mask,
-                            #                                                  input_caption_ids, decoder_mask, shaped=True)
-                            # decoder_scores_siamese = torch.zeros(siamese_clip_num,decoder_scores.size(0),decoder_scores.size(1),decoder_scores.size(2))
-                            # decoder_scores_siamese[0] = decoder_scores
-                            # for _idx in range(1,siamese_clip_num):
-                            #     decoder_scores_temp,res_tuples = self._get_decoder_score(sequence_output, visual_output[_idx],
-                            #                                                  input_ids, attention_mask, video_mask,
-                            #                                                  input_caption_ids, decoder_mask, shaped=True)
-                            #     decoder_scores_siamese[_idx] = decoder_scores_temp
                             video_mask = torch.ones(video_mask.size(0),self.frame_num).to(video_mask.device)
                             decoder_scores_siamese,res_tuples = self._get_decoder_score(sequence_output, visual_output.reshape(-1,visual_output.size(-2),visual_output.size(-1)),
                                                                              input_ids, attention_mask, video_mask,
                                                                              input_caption_ids, decoder_mask, shaped=True)
                             # decoder_scores_siamese = [clip_num , bz , frm_max_length , score_features]
-                            decoder_scores_siamese = decoder_scores_siamese.reshape(self.clip_num,16,decoder_scores_siamese.size(-2),decoder_scores_siamese.size(-1))
+                            decoder_scores_siamese = decoder_scores_siamese.reshape(self.clip_num,decoder_scores_siamese.size(0) // self.clip_num , decoder_scores_siamese.size(-2),decoder_scores_siamese.size(-1))
                             decoder_scores = decoder_scores_siamese[0]
                         
                            
@@ -294,67 +300,14 @@ class UniVL(UniVLPreTrainedModel):
                     else:
                         raise NotImplementedError
                     # visual_output = [clipNum , bz , 48 , 1024]
+                    
                     output_caption_ids = output_caption_ids.view(-1, output_caption_ids.shape[-1])
                     decoder_loss = self.decoder_loss_fct(decoder_scores.view(-1, self.bert_config.vocab_size), output_caption_ids.view(-1))
                     siamese_loss = 0.0
                     loss = decoder_loss
                     if siamese_trigger ==True:
-                        siamese_similarity_m = self.get_crossPair_similarity_logits_concat(sequence_output , visual_output,self.frame_num).to(sequence_output.device)
-                        # siamese_similarity_m = self.get_crossPair_similarity_logits(cross_output,48).to(sequence_output.device)
-                        # siamese_similarity_m = [bz , 8 , 8 ]
-                        
-                        # decoder_scores_siamese = [8,16,48,30522]
-                        # decoder_scores_siamese_T = [16,8,48,30522]
-                        decoder_scores_siamese_T = decoder_scores_siamese.permute(1,0,2,3)
-                        
-                        dec_soft_label = torch.bmm(siamese_similarity_m,decoder_scores_siamese_T.view(decoder_scores_siamese_T.size(0),decoder_scores_siamese_T.size(1),-1))
-                        dec_soft_label = torch.reshape(dec_soft_label,decoder_scores_siamese_T.size())
-                        # dec_soft_label = [bz , clip_nums , max_length , 30522]
-                        # weighted = W1 * A * P = [bz,48,30522]
-                        self.weighted_m1 = self.weighted_m1.to(sequence_output.device)
-                        self.weighted_m2 = self.weighted_m1.to(sequence_output.device)
-                        
-                        
-                        dec_soft_label_weighted = torch.bmm(self.weighted_m1,dec_soft_label.view(dec_soft_label.size(0),dec_soft_label.size(1),-1))
-                        dec_soft_label_weighted = torch.reshape(dec_soft_label_weighted,decoder_scores_siamese[0].size())
-    
-                        anchor_score_weighted = torch.bmm(self.weighted_m2,decoder_scores_siamese_T.view(decoder_scores_siamese_T.size(0),decoder_scores_siamese_T.size(1),-1))
-                        anchor_score_weighted = torch.reshape(anchor_score_weighted,decoder_scores_siamese[0].size())
-                    
-                        final_score_pseudo = 0.6 * dec_soft_label_weighted + 0.4 *anchor_score_weighted
-                        # GTH_pseudo = [16,48,30522]
-                        anchor_score_raw = decoder_scores_siamese[0]
-                        # Index = [16,48]
-                        GTH_index = anchor_score_raw.argmax(-1)
-                        # anchor_score_GTH = anchor_score_raw.gather(-1,GTH_index.unsqueeze(-1)).squeeze(-1)
-                        
-                        # 用learning from inside的方法，和anchor算loss
-                        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
-                        
-                        # 和GTH算loss
-                        # siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size).to(output_caption_ids.device),output_caption_ids.view(-1))
+                        siamese_loss = self.siamese_reasoning(sequence_output,visual_output,decoder_scores_siamese)
                         loss =loss +siamese_loss
-                        # loss =loss
-                        # print(f'decoding:{time.perf_counter() - starttime:.8f}s')
-                        
-                        
-                        
-                        
-                        
-                            
-                            
-                        
-                    
-                    
-                    
-                    
-                    
-                    
-                    # decoder_loss_pseudo = self.decoder_loss_fct(decoder_scores_sia.view(-1, self.bert_config.vocab_size), output_caption_ids.view(-1))
-                    
-                    # decoder_loss_sia = decoder_loss_pseudo
-                    
-                    # loss += 0.7 *decoder_loss + 0.3 * decoder_loss_sia
                     
 
                 if self.task_config.do_pretrain or self.task_config.task_type == "retrieval":
@@ -374,6 +327,39 @@ class UniVL(UniVLPreTrainedModel):
         else:
             return None
 
+    def siamese_reasoning(self,sequence_output,visual_output,decoder_scores_siamese):
+        siamese_similarity_m = self.get_crossPair_similarity_logits_concat(sequence_output , visual_output,self.frame_num).to(sequence_output.device)
+        decoder_scores_siamese_T = decoder_scores_siamese.permute(1,0,2,3)
+                        
+        dec_soft_label = torch.bmm(siamese_similarity_m,decoder_scores_siamese_T.view(decoder_scores_siamese_T.size(0),decoder_scores_siamese_T.size(1),-1))
+        dec_soft_label = torch.reshape(dec_soft_label,decoder_scores_siamese_T.size())
+
+        self.weighted_m1 = self.weighted_m1.to(sequence_output.device)
+        self.weighted_m2 = self.weighted_m1.to(sequence_output.device)
+        dec_soft_label_weighted = torch.bmm(self.weighted_m1,dec_soft_label.view(dec_soft_label.size(0),dec_soft_label.size(1),-1))
+        dec_soft_label_weighted = torch.reshape(dec_soft_label_weighted,decoder_scores_siamese[0].size())
+    
+        anchor_score_weighted = torch.bmm(self.weighted_m2,decoder_scores_siamese_T.view(decoder_scores_siamese_T.size(0),decoder_scores_siamese_T.size(1),-1))
+        anchor_score_weighted = torch.reshape(anchor_score_weighted,decoder_scores_siamese[0].size())
+                    
+        final_score_pseudo = 0.6 * dec_soft_label_weighted + 0.4 *anchor_score_weighted
+        # GTH_pseudo = [16,48,30522]
+        anchor_score_raw = decoder_scores_siamese[0]
+        # Index = [16,48]
+        GTH_index = anchor_score_raw.argmax(-1)
+        # anchor_score_GTH = anchor_score_raw.gather(-1,GTH_index.unsqueeze(-1)).squeeze(-1)
+                        
+        # 用learning from inside的方法，和anchor算loss
+        siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
+        return siamese_loss
+    
+    def go_cross(self, feat_img, mask_img, feat_txt, mask_txt):
+        mask_img , mask_txt = mask_img.repeat(self.clip_num,1) , mask_txt.repeat(self.clip_num,1)
+        feat, mask = torch.cat([feat_txt, feat_img], dim=1), torch.cat([mask_txt, mask_img], dim=1)
+        mask = self.mask_ext(mask, mask.shape, mask.device)
+        out = self.trsfr(feat, mask, output_attentions=True)
+        return out['last_hidden_state'], out['attentions']
+    
     def _calculate_mlm_loss(self, sequence_output_alm, pairs_token_labels):
         alm_scores = self.cls(sequence_output_alm)
         alm_loss = self.alm_loss_fct(alm_scores.view(-1, self.bert_config.vocab_size), pairs_token_labels.view(-1))
@@ -431,6 +417,88 @@ class UniVL(UniVLPreTrainedModel):
         siamese_video = siamese_output.permute(1,0,2,3)
         # output = [8 , bz , 48 , 1024]
         return siamese_video
+    def getSiameseClips_VST(self,video,max_frames):
+        # video = [bz , 48 , 3 , 224 , 224]
+        
+        sia_idx = np.zeros((self.clip_num,self.frame_num),int)
+        single_ran_idx = np.zeros(self.frame_num,int)
+        for j in range(self.frame_num):
+            if j ==0:
+                single_ran_idx[j] = np.random.randint(0,self.frame_num*j+self.frame_num)
+            elif j<=2:
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,self.frame_num*j+self.frame_num)
+            else:
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,max_frames-1-self.frame_num-5+j)
+        sia_idx[0]=single_ran_idx
+        for i in range(1,self.clip_num):
+            sia_idx[i] = i+sia_idx[0]
+        sia_idx = torch.from_numpy(sia_idx)
+        # For Indexing
+        sia_idx = torch.LongTensor(sia_idx).to(video.device)
+        # video_view = [bz,48,hidden_state]
+        video_view = video.view(video.size(0),video.size(1),-1)
+        hidden_dim = video_view.size(-1)
+        siamese_output = torch.zeros(video.size(0),self.clip_num,self.frame_num,hidden_dim)
+        
+        for batch_num in range(video.size(0)):
+        
+            single_batch_video = video_view[batch_num]
+            # gathered_batch_video = [clip_num , 5 , 1024]
+            gathered_batch_video = single_batch_video.unsqueeze(1).expand(48,self.frame_num,hidden_dim).gather(dim = 0 ,index=sia_idx.unsqueeze(2).expand(self.clip_num,self.frame_num,hidden_dim))
+            # gathered_batch_video = [clip_num, 5 + padding=48 , 1024] == [ 8 , 48 , 1024 ] 
+            # need to padding second dim to match frm_max_length
+            # gathered_batch_video_padding = padding_video(gathered_batch_video,max_frames)
+
+            siamese_output[batch_num] = gathered_batch_video
+    
+        # siamese_video = [8 , bz , 48 , 1024]     
+        siamese_video = siamese_output.permute(1,0,2,3)
+        # siamese_video = [8 , bz , 30 , 3 , 224 ,224]  
+        siamese_video = siamese_video.view(siamese_video.size(0),siamese_video.size(1),siamese_video.size(2),video.size(-3),video.size(-2),video.size(-1))
+        
+        
+        return siamese_video
+    def getSiameseClips_VST_eval(self,video,max_frames):
+        # video = [bz , 48 , 3 , 224 , 224]
+        
+
+        single_ran_idx = np.zeros(self.frame_num,int)
+        for j in range(self.frame_num):
+            if j ==0:
+                single_ran_idx[j] = np.random.randint(0,self.frame_num*j+self.frame_num)
+            elif j<=2:
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,self.frame_num*j+self.frame_num)
+            else:
+                single_ran_idx[j] = np.random.randint(single_ran_idx[j-1]+1,max_frames-1-self.frame_num-5+j)
+        
+
+        # For Indexing
+
+        single_ran_idx = torch.LongTensor(single_ran_idx).to(video.device)
+        # video_view = [bz,48,hidden_state]
+        video_view = video.view(video.size(0),video.size(1),-1)
+        hidden_dim = video_view.size(-1)
+        siamese_output = torch.zeros(video.size(0),self.frame_num,hidden_dim)
+        
+        for batch_num in range(video.size(0)):
+        
+            single_batch_video = video_view[batch_num]
+            # gathered_batch_video = [clip_num , 5 , 1024]
+            gathered_batch_video = single_batch_video.gather(dim = 0 ,index=single_ran_idx.unsqueeze(1).expand(self.frame_num,hidden_dim))
+            # gathered_batch_video = [clip_num, 5 + padding=48 , 1024] == [ 8 , 48 , 1024 ] 
+            # need to padding second dim to match frm_max_length
+            # gathered_batch_video_padding = padding_video(gathered_batch_video,max_frames)
+
+            siamese_output[batch_num] = gathered_batch_video
+    
+        # siamese_video = [bz , 48 , 1024]     
+
+        # siamese_video = [bz , 30 , 3 , 224 ,224]  
+        siamese_video = siamese_output.reshape(video.size(0),siamese_output.size(1),video.size(2),video.size(3),-1)
+        
+        
+        
+        return siamese_video
     def get_sequence_visual_output(self, input_ids, token_type_ids, attention_mask, video,raw_video,video_mask, siamese_trigger,shaped=False):
 
         shaped_video = video.reshape(-1,video.size(-2),video.size(-1))
@@ -460,17 +528,46 @@ class UniVL(UniVLPreTrainedModel):
         visual_output = visual_layers[-1]
         
         siamese_video = self.getSiameseClips(visual_output,48)
-        # siamese_video = visual_output.reshape(self.clip_num,visual_output.size(0) // self.clip_num,visual_output.size(-2),visual_output.size(-1))
-        
-        
-        
-        # video_mask = video_mask.repeat(clip_num,1)
-        # visual_layers, _ = self.visual(shaped_video, video_mask, output_all_encoded_layers=True)
-        # visual_output = visual_layers[-1]
-        # visual_output = visual_output.reshape(clip_num , (visual_output.size(0) // clip_num) , visual_output.size(-2) , visual_output.size(-1))
-
         
         return sequence_output, siamese_video
+    
+    def get_sequence_visual_output_VT(self, input_ids, token_type_ids, attention_mask, video,raw_video,video_mask, siamese_trigger,shaped=False):
+    
+        shaped_video = video.reshape(-1,video.size(-2),video.size(-1))
+        # 
+        # siamese_video = torch.zeros(raw_video.size()).repeat(self.clip_num,1,1)
+        encoded_layers, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=True) # 里面一共有12层，取最后一层的输出即为Sequence output
+        sequence_output = encoded_layers[-1]
+        
+        if siamese_trigger == False:
+            visual_layers, _ = self.visual(raw_video, video_mask, output_all_encoded_layers=True)
+            visual_output = visual_layers[-1]
+            return sequence_output,visual_output
+        # video_mask = torch.ones(video.size(0),self.frame_num).long().to(sequence_output.device)
+        raw_video = raw_video.to(sequence_output.device)
+
+        _B, _T, _C, _H, _W = raw_video.shape
+        _h, _w = _H//32, _W//32
+        
+        raw_video = TV.transforms.Normalize([0.485, 0.456, 0.406], 
+                                      [0.229, 0.224, 0.225])(raw_video)
+        if siamese_trigger == True:
+            selected_video = self.getSiameseClips_VST(raw_video,48)
+        selected_video = selected_video.reshape(-1,selected_video.size(2),selected_video.size(3),selected_video.size(4),selected_video.size(5)).to(sequence_output.device)
+        f_video = self.swin(selected_video.transpose(1, 2)).transpose(1, 2)
+        
+        f_video = f_video.permute(0, 1, 3, 4, 2).reshape(self.clip_num,_B ,-1,_h*_w,768)
+        f_video = self.swinNorm(f_video)
+        # 加上一步mean的操作
+        # f_video = [bz,frm,49,768]
+
+        f_video_mean = torch.mean(f_video,-2)
+        
+        
+        
+        
+        return sequence_output, f_video_mean
+    
     def get_sequence_visual_output_eval(self, input_ids, token_type_ids, attention_mask, video, video_mask, shaped=False):
         if shaped is False:
             input_ids = input_ids.view(-1, input_ids.shape[-1])
@@ -486,6 +583,42 @@ class UniVL(UniVLPreTrainedModel):
         visual_output = visual_layers[-1]
 
         return sequence_output, visual_output
+    
+    def get_sequence_visual_output_eval_swin(self, input_ids, token_type_ids, attention_mask, video, video_mask, siamese_trigger,shaped=False):
+        if shaped is False:
+            input_ids = input_ids.view(-1, input_ids.shape[-1])
+            token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
+            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
+            video_mask = video_mask.view(-1, video_mask.shape[-1])
+            # video = self.normalize_video(video)
+
+        encoded_layers, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=True)
+        sequence_output = encoded_layers[-1]
+
+        # visual_layers, _ = self.visual(video, video_mask, output_all_encoded_layers=True)
+        # visual_output = visual_layers[-1]
+        
+        # raw_video = [4,48,3,224,224]
+        
+        raw_video = video.to(sequence_output.device)
+
+        
+        _B, _T, _C, _H, _W = raw_video.shape
+        _h, _w = _H//32, _W//32
+        
+        raw_video = TV.transforms.Normalize([0.485, 0.456, 0.406], 
+                                      [0.229, 0.224, 0.225])(raw_video)
+        selected_video = self.getSiameseClips_VST_eval(raw_video,48)
+        selected_video = selected_video.to(sequence_output.device)
+        f_video = self.swin(selected_video.transpose(1, 2)).transpose(1, 2)
+        f_video = f_video.permute(0, 1, 3, 4, 2).reshape(_B,-1,_h*_w,768)
+
+        f_video = self.swinNorm(f_video)
+        f_video_mean = torch.mean(f_video,-2)
+        
+        visual_output = f_video_mean
+        return sequence_output, visual_output
+    
     def _get_cross_output(self, sequence_output, visual_output, attention_mask, video_mask):
         # 涉及到visual_output第一维度的变化，所以要对sequence_output进行一个重复
         clip_num = visual_output.size(0) // sequence_output.size(0)
@@ -504,6 +637,25 @@ class UniVL(UniVLPreTrainedModel):
         cross_output = cross_layers[-1]
 
         return cross_output, pooled_output, concat_mask
+    def _get_cross_output_swin(self, sequence_output, visual_output, attention_mask, video_mask):
+        # 涉及到visual_output第一维度的变化，所以要对sequence_output进行一个重复
+        clip_num = visual_output.size(0) // sequence_output.size(0)
+        sequence_output = sequence_output.repeat(clip_num,1,1)
+        concat_features = torch.cat((sequence_output, visual_output), dim=1)  # concatnate tokens and frames
+        concat_mask = torch.cat((attention_mask, video_mask), dim=1)
+        concat_mask = concat_mask.repeat(clip_num,1)
+        
+        text_type_ = torch.zeros_like(attention_mask)
+        video_type_ = torch.ones_like(video_mask)
+        concat_type = torch.cat((text_type_, video_type_), dim=1)
+        
+        concat_type = concat_type.repeat(clip_num,1)
+        concat_type = concat_type.long()
+        # cross_layers, pooled_output = self.cross(concat_features, concat_type, concat_mask, output_all_encoded_layers=True)
+        cross_output , _ = self.go_cross(visual_output,video_mask,sequence_output,attention_mask)
+
+
+        return cross_output, concat_mask
 
     def _mean_pooling_for_similarity(self, sequence_output, visual_output, attention_mask, video_mask,):
         attention_mask_un = attention_mask.to(dtype=torch.float).unsqueeze(-1)
@@ -641,7 +793,10 @@ class UniVL(UniVLPreTrainedModel):
         res_tuples = ()
         clip_num = visual_output.size(0) // sequence_output.size(0)
         visual_output = visual_output.to(sequence_output.device)
-        cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output, visual_output, attention_mask, video_mask)
+        if self.swin_trigger == True: 
+            cross_output, concat_mask = self._get_cross_output_swin(sequence_output, visual_output, attention_mask, video_mask)
+        else:
+            cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output, visual_output, attention_mask, video_mask)
         
         input_caption_ids = input_caption_ids.repeat(clip_num,1)
         decoder_mask = decoder_mask.repeat(clip_num,1)

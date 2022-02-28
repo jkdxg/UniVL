@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 from __future__ import print_function
 from locale import normalize
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "6,7,5,4,3,2,1,0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3,1,0"
 import torch
 from torch.utils.data import (SequentialSampler)
 import numpy as np
@@ -21,7 +21,7 @@ from modules.optimization import BertAdam
 from modules.beam import Beam
 from torch.utils.data import DataLoader
 from dataloaders.dataloader_youcook_caption import Youcook_Caption_DataLoader
-from dataloaders.dataloader_msrvtt_caption import MSRVTT_Caption_DataLoader
+from dataloaders.dataloader_msrvtt_caption_swin import MSRVTT_Caption_DataLoader,MSRVTT_Caption_DataLoader_Swin
 from util import get_logger
 torch.distributed.init_process_group(backend="nccl")
 
@@ -32,6 +32,7 @@ def get_args(description='UniVL on Caption Task'):
     parser.add_argument("--do_pretrain", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
     parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
+    parser.add_argument("--do_swin", action='store_true', help="Whether to run swin backbone.")
 
     parser.add_argument('--train_csv', type=str, default='data/youcookii_singlef_train.csv', help='')
     parser.add_argument('--val_csv', type=str, default='data/youcookii_singlef_val.csv', help='')
@@ -278,6 +279,32 @@ def dataloader_msrvtt_train(args, tokenizer):
     )
 
     return dataloader, len(msrvtt_dataset), train_sampler
+def dataloader_msrvtt_train_swin(args, tokenizer):
+
+    msrvtt_dataset_swin = MSRVTT_Caption_DataLoader_Swin(
+        csv_path=args.train_csv,
+        json_path=args.data_path,
+        features_path=args.features_path,
+        max_words=args.max_words,
+        feature_framerate=args.feature_framerate,
+        tokenizer=tokenizer,
+        max_frames=args.max_frames,
+        split_type="train",
+    )
+
+    train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset_swin)
+    
+    dataloader = DataLoader(
+        msrvtt_dataset_swin,
+        batch_size=args.batch_size // args.n_gpu,
+        num_workers=args.num_thread_reader,
+        pin_memory=False,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
+        drop_last=True,
+    )
+
+    return dataloader, len(msrvtt_dataset_swin), train_sampler
 
 def dataloader_msrvtt_test(args, tokenizer, split_type="test",):
     msrvtt_testset = MSRVTT_Caption_DataLoader(
@@ -290,8 +317,30 @@ def dataloader_msrvtt_test(args, tokenizer, split_type="test",):
         max_frames=args.max_frames,
         split_type=split_type,
     )
-
     test_sampler = SequentialSampler(msrvtt_testset)
+    dataloader_msrvtt = DataLoader(
+        msrvtt_testset,
+        sampler=test_sampler,
+        batch_size=args.batch_size_val,
+        num_workers=args.num_thread_reader,
+        pin_memory=False,
+        drop_last=False,
+    )
+    return dataloader_msrvtt, len(msrvtt_testset)
+def dataloader_msrvtt_test_swin(args, tokenizer, split_type="test",):
+    msrvtt_testset = MSRVTT_Caption_DataLoader_Swin(
+        csv_path=args.val_csv,
+        json_path=args.data_path,
+        features_path=args.features_path,
+        max_words=args.max_words,
+        feature_framerate=args.feature_framerate,
+        tokenizer=tokenizer,
+        max_frames=args.max_frames,
+        split_type=split_type,
+    )
+    
+    test_sampler = SequentialSampler(msrvtt_testset)
+    
     dataloader_msrvtt = DataLoader(
         msrvtt_testset,
         sampler=test_sampler,
@@ -411,11 +460,12 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
         # siamese_video = getSiameseClips(video,siamese_video,args.max_frames)
         # print(f'loading:{time.perf_counter() - starttime:.8f}s')
         starttime = time.perf_counter()
+        # video = [bz,48,3,224,224]
         loss = model(input_ids, segment_ids, input_mask, video, siamese_video,video_mask,
                      pairs_masked_text=pairs_masked_text, pairs_token_labels=pairs_token_labels,
                      masked_video=masked_video, video_labels_index=video_labels_index,
                      input_caption_ids=pairs_input_caption_ids, decoder_mask=pairs_decoder_mask,
-                     output_caption_ids=pairs_output_caption_ids,siamese_trigger = True)
+                     output_caption_ids=pairs_output_caption_ids,siamese_trigger = True,swin_trigger = True)
         # print(f'model sum:{time.perf_counter() - starttime:.8f}s')
         starttime = time.perf_counter()
         if n_gpu > 1:
@@ -564,7 +614,10 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
         pairs_input_caption_ids, pairs_decoder_mask, pairs_output_caption_ids = batch
 
         with torch.no_grad():
-            sequence_output, visual_output = model.get_sequence_visual_output_eval(input_ids, segment_ids, input_mask, video, video_mask)
+            if args.do_swin==True:
+                sequence_output, visual_output = model.get_sequence_visual_output_eval_swin(input_ids, segment_ids, input_mask, video, video_mask,siamese_trigger = True)
+            else:
+                sequence_output, visual_output = model.get_sequence_visual_output_eval(input_ids, segment_ids, input_mask, video, video_mask)
             # -- Repeat data for beam search
             n_bm = 5 # beam_size
             device = sequence_output.device
@@ -577,6 +630,8 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
             input_ids = input_ids.view(-1, input_ids.shape[-1])
             input_mask = input_mask.view(-1, input_mask.shape[-1])
             video_mask = video_mask.view(-1, video_mask.shape[-1])
+            if args.do_swin == True:
+                video_mask = torch.ones(video_mask.size(0),len_v).to(video_mask.device)
 
             sequence_output_rpt = sequence_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_s, d_h)
             visual_output_rpt = visual_output.repeat(1, n_bm, 1).view(n_inst * n_bm, len_v, v_h)
@@ -607,7 +662,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
             pairs_output_caption_ids = pairs_output_caption_ids.view(-1, pairs_output_caption_ids.shape[-1])
             caption_list = pairs_output_caption_ids.cpu().detach().numpy()
-
+            # result_list 是 predict，Captionlist是GTH
             for re_idx, re_list in enumerate(result_list):
                 decode_text_list = tokenizer.convert_ids_to_tokens(re_list)
                 if "[SEP]" in decode_text_list:
@@ -677,7 +732,7 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
 
 DATALOADER_DICT = {}
 DATALOADER_DICT["youcook"] = {"train":dataloader_youcook_train, "val":dataloader_youcook_test}
-DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_train, "val":dataloader_msrvtt_test}
+DATALOADER_DICT["msrvtt"] = {"train":dataloader_msrvtt_train, "val":dataloader_msrvtt_test,"train_swin":dataloader_msrvtt_train_swin,"val_swin":dataloader_msrvtt_test_swin}
 
 def main():
     global logger
@@ -692,14 +747,14 @@ def main():
     nlgEvalObj = NLGEval(no_overlap=False, no_skipthoughts=True, no_glove=True, metrics_to_omit=None)
 
     assert args.datatype in DATALOADER_DICT
-    test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val"](args, tokenizer)
+    test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val_swin"](args, tokenizer)
     if args.local_rank == 0:
         logger.info("***** Running test *****")
         logger.info("  Num examples = %d", test_length)
         logger.info("  Batch size = %d", args.batch_size_val)
         logger.info("  Num steps = %d", len(test_dataloader))
 
-    if args.do_train:
+    if args.do_train and args.do_swin==False:
         train_dataloader, train_length, train_sampler = DATALOADER_DICT[args.datatype]["train"](args, tokenizer)
         num_train_optimization_steps = (int(len(train_dataloader) + args.gradient_accumulation_steps - 1)
                                         / args.gradient_accumulation_steps) * args.epochs
@@ -739,8 +794,50 @@ def main():
         if args.local_rank == 0:
             model = load_model(-1, args, n_gpu, device, model_file=best_output_model_file)
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
+    elif args.do_train:
+        train_dataloader, train_length, train_sampler = DATALOADER_DICT[args.datatype]["train_swin"](args, tokenizer)
+        num_train_optimization_steps = (int(len(train_dataloader) + args.gradient_accumulation_steps - 1)
+                                        / args.gradient_accumulation_steps) * args.epochs
+        coef_lr = args.coef_lr
+        if args.init_model:
+            coef_lr = 1.0
+        optimizer, scheduler, model = prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, args.local_rank, coef_lr=coef_lr)
+
+        if args.local_rank == 0:
+            logger.info("***** Running training *****")
+            logger.info("  Num examples = %d", train_length)
+            logger.info("  Batch size = %d", args.batch_size)
+            logger.info("  Num steps = %d", num_train_optimization_steps * args.gradient_accumulation_steps)
+
+        best_score = 0.00001
+        best_output_model_file = None
+        global_step = 0
+        for epoch in range(args.epochs):
+            train_sampler.set_epoch(epoch)
+
+            tr_loss, global_step = train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, optimizer,
+                                               scheduler, global_step, nlgEvalObj=nlgEvalObj, local_rank=args.local_rank)
+
+            if args.local_rank == 0:
+                logger.info("Epoch %d/%s Finished, Train Loss: %f", epoch + 1, args.epochs, tr_loss)
+                output_model_file = save_model(epoch, args, model, type_name="")
+                if epoch >= 5:
+                    Bleu_4 = eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
+                    if best_score <= Bleu_4:
+                        best_score = Bleu_4
+                        best_output_model_file = output_model_file
+                    logger.info("The best model is: {}, the Bleu_4 is: {:.4f}".format(best_output_model_file, best_score))
+                else:
+                    logger.warning("Skip the evaluation after {}-th epoch.".format(epoch+1))
+
+        if args.local_rank == 0:
+            model = load_model(-1, args, n_gpu, device, model_file=best_output_model_file)
+            eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
     elif args.do_eval:
         if args.local_rank == 0:
+    
+            model = load_model(-1, args, n_gpu, device, model_file="/home/gujiayang/data/model/UniVL/siamese_sampling/BEST_after_3*8_loss2anchor/pytorch_model.bin.4")
+            # model = load_model(-1, args, n_gpu, device, model_file="/home/gujiayang/data/model/UniVL/siamese_sampling/ckpt_msrvtt_caption_Wed Feb 23 13:09:03 2022/pytorch_model.bin.6")
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
 
 if __name__ == "__main__":
