@@ -29,6 +29,7 @@ from torch import nn
 import torchvision as TV
 import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss, MSELoss
+from Prepare_inputs import SwinBert
 
 from modules.until_module import PreTrainedModel, LayerNorm, CrossEn, MILNCELoss, MaxMarginRankingLoss
 from modules.module_bert import BertModel, BertConfig, BertOnlyMLMHead 
@@ -47,19 +48,21 @@ class UniVLPreTrainedModel(PreTrainedModel, nn.Module):
     """ An abstract class to handle weights initialization and
         a simple interface for dowloading and loading pretrained models.
     """
-    def __init__(self, bert_config, visual_config, cross_config, decoder_config, *inputs, **kwargs):
+    def __init__(self, bert_config, visual_config, cross_config, *inputs, **kwargs):
         # utilize bert config as base config
         super(UniVLPreTrainedModel, self).__init__(bert_config)
         self.bert_config = bert_config
         self.visual_config = visual_config
         self.cross_config = cross_config
-        self.decoder_config = decoder_config
+        # self.decoder_config = decoder_config
 
         self.bert = None
         self.visual = None
         self.cross = None
         self.decoder = None
-        
+        self.trsfr = None
+        self.swin = None
+
         
         
 
@@ -76,17 +79,35 @@ class UniVLPreTrainedModel(PreTrainedModel, nn.Module):
                 task_config.local_rank = 0
 
         bert_config, state_dict = BertConfig.get_config(pretrained_bert_name, cache_dir, type_vocab_size, state_dict, task_config=task_config)
+        
         visual_config, _ = VisualConfig.get_config(visual_model_name, cache_dir, type_vocab_size, state_dict=None, task_config=task_config)
         cross_config, _ = CrossConfig.get_config(cross_model_name, cache_dir, type_vocab_size, state_dict=None, task_config=task_config)
-        decoder_config, _ = DecoderConfig.get_config(decoder_model_name, cache_dir, type_vocab_size, state_dict=None, task_config=task_config)
+        # decoder_config, _ = DecoderConfig.get_config(decoder_model_name, cache_dir, type_vocab_size, state_dict=None, task_config=task_config)
 
-        model = cls(bert_config, visual_config, cross_config, decoder_config, *inputs, **kwargs)
+        model = cls(bert_config, visual_config, cross_config, *inputs, **kwargs)
         
-        assert model.bert is not None
-        assert model.visual is not None
+        # assert model.bert is not None
+        # assert model.visual is not None
 
         if state_dict is not None:
             model = cls.init_preweight(model, state_dict, task_config=task_config)
+        # pretrained_dict=torch.load("/home/gujiayang/workspace/videocaption/pytorch_violet/_snapshot/ckpt_violet_pretrain.pt", map_location='cpu')
+        
+        # model_dict=model.state_dict()
+        # # 1. filter out unnecessary keys
+        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        # # 2. overwrite entries in the existing state dict
+        # model_dict.update(pretrained_dict)
+        # model.load_state_dict(model_dict)
+        
+        # pretrained_dict =torch.load("/home/gujiayang/workspace/videocaption/ECCV2022_submission_100/checkpoint/UFSSemantics.ckpt", map_location='cpu')['state_dict']
+        # model_dict=model.state_dict()
+        # # 1. filter out unnecessary keys
+        # pretrained_dict = {k: v for k, v in pretrained_dict.items() if 'decoder' in k}
+        # # 2. overwrite entries in the existing state dict
+        # model_dict.update(pretrained_dict)
+        # model.load_state_dict(model_dict)
+        
 
         return model
 
@@ -117,27 +138,37 @@ def check_attr(target_name, task_config):
     return hasattr(task_config, target_name) and task_config.__dict__[target_name]
 
 class UniVL(UniVLPreTrainedModel):
-    def __init__(self, bert_config, visual_config, cross_config, decoder_config, task_config):
-        super(UniVL, self).__init__(bert_config, visual_config, cross_config, decoder_config)
+    def __init__(self, bert_config, visual_config, cross_config, task_config):
+        super(UniVL, self).__init__(bert_config, visual_config, cross_config)
         self.task_config = task_config
         self.ignore_video_index = -1
 
         assert self.task_config.max_words <= bert_config.max_position_embeddings
-        assert self.task_config.max_words <= decoder_config.max_target_embeddings
+        # assert self.task_config.max_words <= decoder_config.max_target_embeddings
         assert self.task_config.max_frames <= visual_config.max_position_embeddings
         assert self.task_config.max_words + self.task_config.max_frames <= cross_config.max_position_embeddings
 
         self._stage_one = True
         self._stage_two = False
         
-        self.clip_num = 3
-        self.frame_num = 6
+        self.clip_num = 1
+        self.frame_num = 4
         self.emb_cls = torch.nn.Parameter(0.02*torch.randn(1, 1, 1, 768))
         self.emb_pos = torch.nn.Parameter(0.02*torch.randn(1, 1, 1+14**2, 768))
         self.emb_len = torch.nn.Parameter(0.02*torch.randn(1, 6, 1, 768))
         
         bert = transformers.BertForMaskedLM.from_pretrained('bert-base-uncased')
         self.mask_ext, self.trsfr = bert.get_extended_attention_mask, bert.bert.encoder
+        
+        #BERT-Decoder
+        self.tokenizer_lm = transformers.BertTokenizer.from_pretrained('bert-base-uncased')
+        config_lm = transformers.BertConfig.from_pretrained("bert-base-uncased", bos_token_id=101, pad_token_id=0, eos_token_id=102)
+        config_lm.is_decoder = True
+        config_lm.add_cross_attention = True
+        config_lm.hidden_dropout_prob = 0.3
+        config_lm.attention_probs_dropout_prob = 0.3
+        self.decoder = SwinBert.from_pretrained('bert-base-uncased', config=config_lm)
+        
 
         if check_attr('stage_two', self.task_config):
             self._stage_one = False
@@ -153,16 +184,20 @@ class UniVL(UniVLPreTrainedModel):
         bert_config = update_attr("bert_config", bert_config, "num_hidden_layers",
                                    self.task_config, "text_num_hidden_layers")
         self.bert = BertModel(bert_config)
+        # self.bert =None
         
         
         bert_word_embeddings_weight = self.bert.embeddings.word_embeddings.weight
         bert_position_embeddings_weight = self.bert.embeddings.position_embeddings.weight
+        bert_word_embeddings_weight = None
+        bert_position_embeddings_weight = None
         # <=== End of Text Encoder
 
         # Video Encoder ===>
         visual_config = update_attr("visual_config", visual_config, "num_hidden_layers",
                                     self.task_config, "visual_num_hidden_layers")
-        self.visual = VisualModel(visual_config) # Transformer_based module
+        # self.visual = VisualModel(visual_config) # Transformer_based module
+        self.visual =None
         self.swin = SwinTransformer3D()
         self.swin.load_state_dict(torch.load('/home/gujiayang/workspace/videocaption/UniVL/_snapshot/ckpt_video-swin.pt', map_location='cpu'))
         self.swinNorm = torch.nn.LayerNorm(768)
@@ -171,17 +206,11 @@ class UniVL(UniVLPreTrainedModel):
         self.fc2 = torch.nn.Linear(self.clip_num,1)
         self.swin_trigger = True
         self.siamese_trigger = True
-        visual_word_embeddings_weight = self.visual.embeddings.word_embeddings.weight
+        # visual_word_embeddings_weight = self.visual.embeddings.word_embeddings.weight
+        visual_word_embeddings_weight = None
         # <=== End of Video Encoder
         
-        #BERT-Decoder
-        # self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        # config = transformers.BertConfig.from_pretrained("bert-base-uncased", bos_token_id=101, pad_token_id=0, eos_token_id=102)
-        # config.is_decoder = True
-        # config.add_cross_attention = True
-        # config.hidden_dropout_prob = 0.3
-        # config.attention_probs_dropout_prob = 0.3
-        # self.decoder = transformers.BertLMHeadModel.from_pretrained('bert-base-uncased', config=config)
+        
         
         if self._stage_one is False or self.train_sim_after_cross:
             # Cross Encoder ===>
@@ -190,12 +219,12 @@ class UniVL(UniVLPreTrainedModel):
             self.cross = CrossModel(cross_config)
             # <=== End of Cross Encoder
 
-            if self.train_sim_after_cross is False:
+            # if self.train_sim_after_cross is False:
                 # Decoder ===>
-                decoder_config = update_attr("decoder_config", decoder_config, "num_decoder_layers",
-                                           self.task_config, "decoder_num_hidden_layers")
-                self.decoder = DecoderModel(decoder_config, bert_word_embeddings_weight, bert_position_embeddings_weight)
-                # <=== End of Decoder
+                # decoder_config = update_attr("decoder_config", decoder_config, "num_decoder_layers",
+                #                            self.task_config, "decoder_num_hidden_layers")
+                # self.decoder = DecoderModel(decoder_config, bert_word_embeddings_weight, bert_position_embeddings_weight)
+                # # <=== End of Decoder
 
             if self.task_config.do_pretrain:
                 self.cls = BertOnlyMLMHead(bert_config, bert_word_embeddings_weight)
@@ -234,10 +263,6 @@ class UniVL(UniVLPreTrainedModel):
         attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
         video_mask = video_mask.view(-1, video_mask.shape[-1])
         self.siamese_trigger = siamese_trigger
-        # for _idx in range(siamese_clip_num):
-        #     siamese_video[_idx] = self.normalize_video(siamese_video[_idx])
-        
-        # print(f'nomalized:{time.perf_counter() - starttime:.8f}s')
         
         starttime = time.perf_counter()
         if input_caption_ids is not None:
@@ -266,37 +291,14 @@ class UniVL(UniVLPreTrainedModel):
 
             if self._stage_two:
                 if self.task_config.do_pretrain:
-                    pairs_masked_text = pairs_masked_text.view(-1, pairs_masked_text.shape[-1])
-                    pairs_token_labels = pairs_token_labels.view(-1, pairs_token_labels.shape[-1])
-
-                    masked_video = self.normalize_video(masked_video)
-                    video_labels_index = video_labels_index.view(-1, video_labels_index.shape[-1])
-
-                    sequence_output_alm, visual_output_alm = self.get_sequence_visual_output(pairs_masked_text, token_type_ids,
-                                                                                             attention_mask, masked_video, video_mask, shaped=True)
-
-                    cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output_alm, visual_output_alm, attention_mask, video_mask)
-                    sequence_cross_output, visual_cross_output = torch.split(cross_output, [attention_mask.size(-1), video_mask.size(-1)], dim=1)
-
-                    alm_loss = self._calculate_mlm_loss(sequence_cross_output, pairs_token_labels)
-                    loss += alm_loss
-
-                    nce_loss = self._calculate_mfm_loss(visual_cross_output, video, video_mask, video_labels_index)
-                    loss += nce_loss
-
-                    sim_matrix = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
-                                                            shaped=True, _pretrain_joint=True)
-                    sim_loss_joint = self._pretrain_sim_loss_fct(sim_matrix)
-                    loss += sim_loss_joint
+                    
+                    loss += 0
 
                 if (input_caption_ids is not None) and \
                         (self.task_config.do_pretrain
                          or (self.task_config.do_pretrain is False and self.task_config.task_type == "caption")):
-                    if self.task_config.do_pretrain:
-                        decoder_scores, res_tuples = self._get_decoder_score(sequence_output_alm, visual_output_alm,
-                                                                             input_ids, attention_mask, video_mask,
-                                                                             input_caption_ids, decoder_mask, shaped=True)
-                    elif self.task_config.task_type == "caption":
+        
+                    if self.task_config.task_type == "caption":
                         if siamese_trigger == False:
                             video_mask = torch.ones(video_mask.size(0),self.frame_num*50).to(video_mask.device)
                             decoder_scores,res_tuples = self._get_decoder_score(sequence_output, visual_output,
@@ -316,7 +318,6 @@ class UniVL(UniVLPreTrainedModel):
                     else:
                         raise NotImplementedError
                     # visual_output = [clipNum , bz , 48 , 1024]
-                    
                     output_caption_ids = output_caption_ids.view(-1, output_caption_ids.shape[-1])
                     decoder_loss = self.decoder_loss_fct(decoder_scores.view(-1, self.bert_config.vocab_size), output_caption_ids.view(-1))
                     # tokenizer.convert_ids_to_tokens([7002,7010])
@@ -353,11 +354,8 @@ class UniVL(UniVLPreTrainedModel):
                         loss =loss +siamese_loss
                     
 
-                if self.task_config.do_pretrain or self.task_config.task_type == "retrieval":
-                    if self.task_config.do_pretrain:
-                        sim_matrix_text_visual = self.get_similarity_logits(sequence_output_alm, visual_output_alm,
-                                                                            attention_mask, video_mask, shaped=True)
-                    elif self.task_config.task_type == "retrieval":
+                if self.task_config.do_pretrain or self.task_config.task_type == "retrieval":     
+                    if self.task_config.task_type == "retrieval":
                         sim_matrix_text_visual = self.get_similarity_logits(sequence_output, visual_output,
                                                                             attention_mask, video_mask, shaped=True)
                     else:
@@ -396,40 +394,15 @@ class UniVL(UniVLPreTrainedModel):
         siamese_loss = self.decoder_loss_fct(final_score_pseudo.view(-1,self.bert_config.vocab_size),GTH_index.view(-1))
         return siamese_loss
     
-    def go_cross(self, feat_img, mask_img, feat_txt, mask_txt,clip_num):
-        if (self.siamese_trigger):
-            mask_img , mask_txt = mask_img.repeat(clip_num,1) , mask_txt.repeat(clip_num,1)
-        feat, mask = torch.cat([feat_img, feat_txt], dim=1), torch.cat([mask_img, mask_txt], dim=1)
-        mask = self.mask_ext(mask, mask.shape, mask.device)
-        out = self.trsfr(feat, mask, output_attentions=True)
+    def go_cross(self, feat_img, mask_img):
+        # if (self.siamese_trigger):
+        #     mask_img , mask_txt = mask_img.repeat(clip_num,1) , mask_txt.repeat(clip_num,1)
+        mask = self.mask_ext(mask_img, mask_img.shape, mask_img.device)
+        out = self.trsfr(feat_img, mask, output_attentions=True)
         return out['last_hidden_state'], out['attentions']
    
     
-    def _calculate_mlm_loss(self, sequence_output_alm, pairs_token_labels):
-        alm_scores = self.cls(sequence_output_alm)
-        alm_loss = self.alm_loss_fct(alm_scores.view(-1, self.bert_config.vocab_size), pairs_token_labels.view(-1))
-        return alm_loss
-
-    def _calculate_mfm_loss(self, visual_output_alm, video, video_mask, video_labels_index):
-        afm_scores = self.cls_visual(visual_output_alm)
-        afm_scores_tr = afm_scores.view(-1, afm_scores.shape[-1])
-
-        video_tr = video.permute(2, 0, 1)
-        video_tr = video_tr.view(video_tr.shape[0], -1)
-
-        logits_matrix = torch.mm(afm_scores_tr, video_tr)
-        video_mask_float = video_mask.to(dtype=torch.float)
-        mask_matrix = torch.mm(video_mask_float.view(-1, 1), video_mask_float.view(1, -1))
-        masked_logits = logits_matrix + (1. - mask_matrix) * -1e8
-
-        logpt = F.log_softmax(masked_logits, dim=-1)
-        logpt = torch.diag(logpt)
-        nce_loss = -logpt
-
-        video_labels_index_mask = (video_labels_index != self.ignore_video_index)
-        nce_loss = nce_loss.masked_select(video_labels_index_mask.view(-1))
-        nce_loss = nce_loss.mean()
-        return nce_loss
+    
     def getSiameseClips(self,video,max_frames):
         siamese_output = torch.zeros(video.size(0),self.clip_num,self.frame_num,video.size(-1))
         sia_idx = np.zeros((self.clip_num,self.frame_num),int)
@@ -494,13 +467,11 @@ class UniVL(UniVLPreTrainedModel):
 
             siamese_output[batch_num] = gathered_batch_video
     
-        # siamese_output = [bz , clip , frm , hidden]     
-        siamese_video = siamese_output.permute(1,0,2,3)
-        # siamese_video = [clip , bz , 30 , 3 , 224 ,224]  
-        siamese_video = siamese_video.view(siamese_video.size(0),siamese_video.size(1),siamese_video.size(2),video.size(-3),video.size(-2),video.size(-1))
+        # siamese_output = [bz , clip , frm , hidden]   
+        siamese_video = siamese_output[:,0,:,:]  
+        siamese_video = siamese_video.reshape(video.size(0),-1,video.size(2),video.size(3),video.size(4))
         
-        
-        return siamese_video[0]
+        return siamese_video
     def getSiameseClips_VST(self,video,max_frames):
         # video = [bz , 48 , 3 , 224 , 224]
         
@@ -752,38 +723,30 @@ class UniVL(UniVLPreTrainedModel):
         cross_output = cross_layers[-1]
 
         return cross_output, pooled_output, concat_mask
-    def _get_cross_output_swin(self, sequence_output, visual_output, attention_mask, video_mask):
+    def _get_cross_output_swin(self,visual_output,video_mask):
         # 涉及到visual_output第一维度的变化，所以要对sequence_output进行一个重复
-        clip_num = visual_output.size(0) // sequence_output.size(0)
-        sequence_output = sequence_output.repeat(clip_num,1,1)
+        
+
         visual_output = visual_output.reshape(visual_output.size(0),-1,visual_output.size(-1))
-        concat_features = torch.cat((sequence_output, visual_output), dim=1)  # concatnate tokens and frames
-        
-        
-        text_type_ = torch.zeros_like(attention_mask)
+
         video_type_ = torch.ones_like(video_mask)
-        concat_type = torch.cat((text_type_, video_type_), dim=1)
-        
-        concat_type = concat_type.repeat(clip_num,1)
-        concat_type = concat_type.long()
-        concat_mask = torch.cat((attention_mask, video_mask), dim=1)
-        concat_mask = concat_mask.repeat(clip_num,1)
+
+
         # -------------------------------- violet cross begin -------------------------------- #
-        # out , _ = self.go_cross(visual_output,video_mask,sequence_output,attention_mask,clip_num)
-        # out = video + txt
+        # out = video
+        out , _ = self.go_cross(visual_output,video_mask)
         
-        # global_output=torch.cat((out[:,0, :].unsqueeze(1),out[:,50, :].unsqueeze(1),out[:,100, :].unsqueeze(1),out[:,150, :].unsqueeze(1),out[:,200, :].unsqueeze(1),out[:,250, :].unsqueeze(1)),dim=1)
-        # c_out = torch.cat((global_output,out[:,300:,:]),dim=1)
+        # global_output=torch.cat((out[:,0, :].unsqueeze(1),out[:,50, :].unsqueeze(1),out[:,100, :].unsqueeze(1),out[:,150, :].unsqueeze(1),out[:,200, :].unsqueeze(1),out[:,250, :].unsqueeze(1)),dim=1).to(visual_output.device)
+        # video_mask = torch.ones(global_output.size(0),global_output.size(1)).to(visual_output.device)
         
-        # concat_mask = torch.cat((video_mask[:,-(self.frame_num):],attention_mask), dim=1)
-        # concat_mask = concat_mask.repeat(clip_num,1)
-        # return c_out, concat_mask
+        
+        return out, video_mask
         # -------------------------------- violet cross end -------------------------------- #
         
-        cross_layers, pooled_output = self.cross(concat_features, concat_type, concat_mask, output_all_encoded_layers=True)
-        cross_output = cross_layers[-1]
+        # cross_layers, pooled_output = self.cross(concat_features, concat_type, concat_mask, output_all_encoded_layers=True)
+        # cross_output = cross_layers[-1]
 
-        return cross_output, concat_mask
+        # return cross_output, concat_mask
         
 
     def _mean_pooling_for_similarity(self, sequence_output, visual_output, attention_mask, video_mask,):
@@ -922,16 +885,17 @@ class UniVL(UniVLPreTrainedModel):
         clip_num = visual_output.size(0) // sequence_output.size(0)
         visual_output = visual_output.to(sequence_output.device)
         if self.swin_trigger == True: 
-            # cross_output, concat_mask = self._get_cross_output_swin(sequence_output, visual_output, attention_mask, video_mask)
-            cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output, visual_output, attention_mask, video_mask)
+            cross_output, concat_mask = self._get_cross_output_swin(visual_output,video_mask)
+            # cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output, visual_output, attention_mask, video_mask)
         else:
             cross_output, pooled_output, concat_mask = self._get_cross_output(sequence_output, visual_output, attention_mask, video_mask)
         
         input_caption_ids = input_caption_ids.repeat(clip_num,1)
         decoder_mask = decoder_mask.repeat(clip_num,1)
-        decoder_scores = self.decoder(input_caption_ids, encoder_outs=cross_output, answer_mask=decoder_mask, encoder_mask=concat_mask)
+        # decoder_scores = self.decoder(input_caption_ids, encoder_outs=cross_output, answer_mask=decoder_mask, encoder_mask=concat_mask)
+        decoder_scores = self.decoder(input_caption_ids,encoder_hidden_states = cross_output)
         
-        return decoder_scores,res_tuples
+        return decoder_scores.logits,res_tuples
     
 
     def decoder_caption(self, sequence_output, visual_output, input_ids, attention_mask, video_mask, input_caption_ids, decoder_mask,

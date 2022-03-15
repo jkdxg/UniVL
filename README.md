@@ -22,3 +22,7 @@ similarity在cross encoder之后进行计算，效果较差
 1. visual encoder使用了VideoSwinT，然而效果掉了一半。怀疑是patch的处理不太对劲，打算更换一个cross encoder
 2. eval的时候发现，把visual mask全部置为1将非常有利于效果的提升。现在还没做baseline的实验
 3. 怀疑eval的写法有些问题，当前还没改
+
+### version 0.5.2
+1. 结构精简为swin、cross、dec。其中dec来自bert.LMHead
+2. 把预训练模型载入，具体改的部分在xxx_simple.py文件里，同时意识到之前eval的时候可能没有载入对应的weight

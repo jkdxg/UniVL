@@ -4,7 +4,7 @@ from __future__ import unicode_literals
 from __future__ import print_function
 from locale import normalize
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5"
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import torch
 from torch.utils.data import (SequentialSampler)
@@ -17,7 +17,7 @@ import time
 import argparse
 from modules.tokenization import BertTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from modules.modeling import UniVL
+from modules.modeling_simple import UniVL
 from modules.optimization import BertAdam
 from modules.beam import Beam
 from torch.utils.data import DataLoader
@@ -161,14 +161,35 @@ def init_device(args, local_rank):
 def init_model(args, device, n_gpu, local_rank):
 
     if args.init_model:
-        model_state_dict = torch.load(args.init_model, map_location='cpu')
+        # model_state_dict = torch.load('/home/gujiayang/workspace/videocaption/UniVL/_snapshot/ckpt_video-swin.pt', map_location='cpu')
+        # model_state_dict = torch.load(args.init_model, map_location='cpu')
+        model_state_dict = torch.load("/home/gujiayang/workspace/videocaption/pytorch_violet/_snapshot/ckpt_violet_pretrain.pt", map_location='cpu')
+        # model_state_dict = model_state_dict.update(trsfr_swin_state_dict)
+        model_state_dict = {k: v for k, v in model_state_dict.items() if 'trsfr' in k}
+        pretrained_dict =torch.load("/home/gujiayang/workspace/videocaption/ECCV2022_submission_100/checkpoint/UFSSemantics.ckpt", map_location='cpu')['state_dict']
+
+        # 1. filter out unnecessary keys
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if 'decoder' in k}
+        # 2. overwrite entries in the existing state dict
+        # model_dict.update(pretrained_dict)
+        model_state_dict.update(pretrained_dict)
+        
+        # swin_dict = torch.load('/home/gujiayang/workspace/videocaption/UniVL/_snapshot/ckpt_video-swin.pt', map_location='cpu')
+
+        # model_state_dict.update(swin_dict)
+        
+        
+       
+        # model_state_dict = dict(model_state_dict.item()+trsfr_swin_state_dict.item())
+        
     else:
         model_state_dict = None
-
+    
     # Prepare model
     cache_dir = "/home/gujiayang/workspace/videocaption/UniVL/cache_dir"    
     model = UniVL.from_pretrained(args.bert_model, args.visual_model, args.cross_model, args.decoder_model,
                                    cache_dir=cache_dir, state_dict=model_state_dict, task_config=args)
+    
 
     model.to(device)
     
@@ -473,7 +494,7 @@ def train_epoch(epoch, args, model, train_dataloader, tokenizer, device, n_gpu, 
         starttime = time.perf_counter()
         # video = [bz,48,3,224,224]
         output_trigger = False
-        if global_step >=1 and global_step%25 ==0:
+        if global_step >=100 and global_step%75 ==0:
             output_trigger =True
         loss = model(input_ids, segment_ids, input_mask, video, siamese_video,video_mask,
                      pairs_masked_text=pairs_masked_text, pairs_token_labels=pairs_token_labels,
@@ -614,8 +635,8 @@ def eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalOb
     if hasattr(model, 'module'):
         model = model.module.to(device)
 
-    if model._stage_one:
-        return 0.
+    # if model._stage_one:
+    #     return 0.
 
     all_result_lists = []
     all_caption_lists = []
@@ -796,7 +817,7 @@ def main():
             if args.local_rank == 0:
                 logger.info("Epoch %d/%s Finished, Train Loss: %f", epoch + 1, args.epochs, tr_loss)
                 output_model_file = save_model(epoch, args, model, type_name="")
-                if epoch >= 7:
+                if epoch >= 1:
                     if args.do_swin == True:
                         test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val_swin"](args, tokenizer)
                     else:
@@ -851,7 +872,7 @@ def main():
             if args.local_rank == 0:
                 logger.info("Epoch %d/%s Finished, Train Loss: %f", epoch + 1, args.epochs, tr_loss)
                 output_model_file = save_model(epoch, args, model, type_name="")
-                if epoch >= 7:
+                if epoch >= 5:
                     if args.do_swin == True:
                         test_dataloader, test_length = DATALOADER_DICT[args.datatype]["val_swin"](args, tokenizer)
                     else:
@@ -890,7 +911,7 @@ def main():
             logger.info("  Batch size = %d", args.batch_size_val)
             logger.info("  Num steps = %d", len(test_dataloader))
             # model = load_model(-1, args, n_gpu, device, model_file="/home/gujiayang/data/model/UniVL/siamese_sampling/BEST_after_3*8_loss2anchor/pytorch_model.bin.4")
-            model = load_model(-1, args, n_gpu, device, model_file="/home/gujiayang/data/model/UniVL/siamese_sampling/ckpt_msrvtt_caption_Tue Mar  1 11:40:25 2022/pytorch_model.bin.5")
+            model = load_model(-1, args, n_gpu, device, model_file="/home/gujiayang/data/model/UniVL/siamese_sampling/ckpt_msrvtt_caption_Mon Mar 14 09:05:20 2022/pytorch_model.bin.1")
             eval_epoch(args, model, test_dataloader, tokenizer, device, n_gpu, nlgEvalObj=nlgEvalObj)
 
 if __name__ == "__main__":
