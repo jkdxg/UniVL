@@ -26,3 +26,11 @@ similarity在cross encoder之后进行计算，效果较差
 ### version 0.5.2
 1. 结构精简为swin、cross、dec。其中dec来自bert.LMHead
 2. 把预训练模型载入，具体改的部分在xxx_simple.py文件里，同时意识到之前eval的时候可能没有载入对应的weight
+
+
+---
+## version 0.6
+### version 0.6.1
+1. 实现了swin backbone+Transformer backbone的正常结果，同时将siamese sampling通过trigger的方式融入，但是由于资源等原因无法跑过SOTA
+
+
